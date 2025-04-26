@@ -1,5 +1,6 @@
+import { database } from './firebase/config';
+import { ref, onValue } from 'firebase/database';
 import React, { useEffect, useState } from 'react';
-import * as XLSX from 'xlsx';
 import moment from 'moment';
 import {
   Container,
@@ -14,6 +15,8 @@ import {
   Grid,
   Card,
   CardContent,
+  Box,
+  Chip,
 } from '@mui/material';
 import {
   LineChart,
@@ -25,47 +28,44 @@ import {
   CartesianGrid,
   ResponsiveContainer,
 } from 'recharts';
-import { Thermostat, WaterDrop, Air } from '@mui/icons-material';
+import { Thermostat, WaterDrop, Air, AccessTime } from '@mui/icons-material';
+
+type SensorData = {
+  Timestamp: string;
+  Temperature: number;
+  Humidity: number;
+};
 
 function App() {
-  const [data, setData] = useState([]);
+  const [data, setData] = useState<SensorData[]>([]);
+  const [currentTime, setCurrentTime] = useState<string>(moment().format('YYYY-MM-DD HH:mm:ss'));
 
   useEffect(() => {
-    const SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vTHFmK0U_uQdFXRTV3FOTSCoVwGLIxBQjEa3mgPkdzQWQ_kFQJ0eOY9bRGUUvAx8GkowDCO1fPoYL17/pub?gid=0&single=true&output=csv';
-  
-    fetch(SHEET_CSV_URL)
-      .then((res) => res.text())
-      .then((csvText) => {
-        const rows = XLSX.read(csvText, { type: 'string' }).Sheets.Sheet1;
-        const jsonData = XLSX.utils.sheet_to_json(rows, { raw: true });
-  
-        const parsedData = jsonData.map((row) => {
-          let timestamp = row.Timestamp;
-          if (!isNaN(timestamp)) {
-            const dateObj = XLSX.SSF.parse_date_code(timestamp);
-            timestamp = new Date(Date.UTC(
-              dateObj.y,
-              dateObj.m - 1,
-              dateObj.d,
-              dateObj.H,
-              dateObj.M,
-              dateObj.S
-            )).toISOString();
-          }
-          return {
-            ...row,
-            Timestamp: timestamp,
-          };
-        });
-  
+    const sensorRef = ref(database, 'Sensor/');
+    onValue(sensorRef, (snapshot) => {
+      const rawData = snapshot.val();
+      if (rawData) {
+        const parsedData = Object.keys(rawData).map((key) => ({
+          Timestamp: key,
+          Temperature: rawData[key].Temperature,
+          Humidity: rawData[key].Humidity,
+        }));
         setData(parsedData);
-      });
+      }
+    });
   }, []);
-  
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setCurrentTime(moment().format('YYYY-MM-DD HH:mm:ss'));
+    }, 1000); // Update every second
+
+    return () => clearInterval(interval); // Cleanup
+  }, []);
 
   const latest = data.length > 0 ? data[data.length - 1] : null;
 
-  const getSummary = (key) => {
+  const getSummary = (key: keyof SensorData) => {
     const values = data.map((d) => Number(d[key])).filter((v) => !isNaN(v));
     const avg = (values.reduce((a, b) => a + b, 0) / values.length).toFixed(2);
     const min = Math.min(...values).toFixed(2);
@@ -73,7 +73,7 @@ function App() {
     return { avg, min, max };
   };
 
-  const getAirQualityStatus = (temp, humidity) => {
+  const getAirQualityStatus = (temp: number, humidity: number) => {
     if (temp >= 18 && temp <= 28 && humidity >= 30 && humidity <= 60) return { status: 'Good', color: '#c8e6c9' };
     if ((temp >= 16 && temp < 18) || (temp > 28 && temp <= 32) ||
         (humidity >= 25 && humidity < 30) || (humidity > 60 && humidity <= 70))
@@ -87,9 +87,18 @@ function App() {
 
   return (
     <Container sx={{ py: 4 }}>
-      <Typography variant="h4" gutterBottom>
-        Air Quality Dashboard
-      </Typography>
+      <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+        <Typography variant="h4" gutterBottom sx={{ mr: 2 }}>
+          Air Quality Dashboard
+        </Typography>
+        <Chip
+          icon={<AccessTime />}
+          label={currentTime}
+          variant="outlined"
+          color="primary"
+          sx={{ fontWeight: 'bold' }}
+        />
+      </Box>
 
       {latest && (
         <>
